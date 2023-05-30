@@ -1,0 +1,324 @@
+
+; /* Start:"a:4:{s:4:"full";s:90:"/local/templates/main/components/bitrix/sale.order.ajax/basket.2/script.js?168512140518260";s:6:"source";s:74:"/local/templates/main/components/bitrix/sale.order.ajax/basket.2/script.js";s:3:"min";s:0:"";s:3:"map";s:0:"";}"*/
+var arBasketResult = [];
+
+arBasketJS = function (params) {
+    arBasketResult = params;
+    // console.log("basket.script");
+    // console.log(arBasketResult);
+};
+
+
+(function(window) {
+    window.addEventListener('DOMContentLoaded', function() {
+
+        //Получение объекта формы и инициализация события submit
+        var form = document.getElementById("bx-soa-order-form");
+        if (!form) {
+            return;
+        }
+
+        //Инициализация функций и событий для товаров
+        const productLi = form.querySelectorAll('.js-product');
+        productLi.forEach(product => {
+            //Изменение количества товара
+            product.querySelector('.input-number__input').addEventListener('input', function (e) {
+                let data = {};
+                data["action"] = 'quantity';
+                data["id"] = product.dataset.id;
+                data["quantity"] = product.querySelector('.input-number__input').value.replace(/[^0-9]/g,"");
+                ajax('quantity', data);
+            });
+
+            //Удаление товара
+            product.querySelector('.js-delete').addEventListener('click', function (e) {
+                e.preventDefault();
+                let data = {};
+                data["action"] = 'delete';
+                data["id"] = product.dataset.id;
+                ajax('delete', data);
+            });
+        });
+
+        //Инициализация события добавления файла
+        form.querySelectorAll('.file-upload').forEach(div => {
+            div.querySelector('input').addEventListener('change', function (e) {
+                if (div.querySelector('input').files[0].name) {
+                    div.querySelector('.file-upload__input').innerHTML = div.querySelector('input').files[0].name;
+                }
+            });
+        })
+
+        //Инициализация события выбора доставки
+        form.querySelectorAll('input[name="DELIVERY_ID"]').forEach(item => {
+            item.addEventListener('change', function (e) {
+                ajax('refreshOrderAjax');
+            });
+        })
+
+        //Инициализация события выбора оплаты
+        form.querySelectorAll('input[name="PAY_SYSTEM_ID"]').forEach(item => {
+            item.addEventListener('change', function () {
+                ajax('refreshOrderAjax');
+            });
+        })
+
+        //Инициализация события отправки заказа
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (arBasketResult["TOTAL"]["BASKET_POSITIONS"] > 0) {
+                form.querySelector('.cart-btn-submit').disabled = true;
+                ajax('saveOrderAjax');
+            } else {
+                fNotification('В корзине нет товаров для оформления заказа');
+            }
+        });
+
+        //Функция ajax запроса
+        function ajax(action = 'refreshOrderAjax', customData = {}, bOnlyPayment = false) {
+            if (arBasketResult["TOTAL"]["BASKET_POSITIONS"] > 0) {
+                if (action === "quantity" || action === "delete") //Удаление товара или изменение количества
+                {
+                    // console.log(customData);
+                    BX.ajax({
+                        url: "/local/ajax/basket.2.php",
+                        method: 'POST',
+                        data: customData,
+                        dataType: 'json',
+                        processData: false,
+                        onsuccess: function (res) {
+                            res = JSON.parse(res)
+                            // console.log(res);
+
+                            if (res['status']) {
+                                if (res['action'] == 'delete') {
+                                    document.getElementById("item-" + customData["id"]).remove();
+                                }
+                                ajax('refreshOrderAjax');
+
+                                //Обновляем корзину в шапке
+                                window.BX.ajax({
+                                    url: '/local/include/header/basket.php',
+                                    method: 'POST',
+                                    onsuccess: function (res) {
+                                        //console.log(res);
+
+                                        if (res) {
+                                            document.getElementById('block-cart').innerHTML = res;
+                                        }
+                                    },
+                                    onfailure: function () {
+                                    }
+                                })
+                            } else {
+                                if (res['message']) {
+                                    fNotification(res['message']);
+                                    ajax('refreshOrderAjax');
+                                } else {
+                                    fNotification('Ошибка2');
+                                }
+                            }
+                        },
+                        onfailure: function () {
+                            fNotification('Ошибка1');
+                        }
+                    })
+                } else if (action === 'saveOrderAjax') //Оформление заказа
+                {
+                    form.querySelector('input[type=hidden][name=sessid]').value = BX.bitrix_sessid();
+
+                    BX.ajax.submitAjax(
+                      BX('bx-soa-order-form'),
+                      {
+                          url: arBasketResult["ajaxUrl"],
+                          method: 'POST',
+                          dataType: 'json',
+                          data: {
+                              via_ajax: 'Y',
+                              action: 'saveOrderAjax',
+                              sessid: BX.bitrix_sessid(),
+                              SITE_ID: arBasketResult["siteID"],
+                              signedParamsString: arBasketResult["signedParamsString"]
+                          },
+                          onsuccess: BX.delegate(function (result) {
+                              // console.log(result);
+
+                              if (result["order"]["REDIRECT_URL"]) {
+                                  window.location.href = result["order"]["REDIRECT_URL"];
+                              } else {
+                                  if (result["order"]["ERROR"]) {
+                                      let textError = "";
+                                      for (let keyType in result["order"]["ERROR"]) {
+                                          for (let keyError in result["order"]["ERROR"][keyType]) {
+                                              textError = textError + result["order"]["ERROR"][keyType][keyError] + "<br>";
+                                          }
+                                      }
+                                      if (textError != "") {
+                                          fNotification(textError);
+                                      } else {
+                                          fNotification('Ошибка');
+                                      }
+                                  } else {
+                                      fNotification('Ошибка');
+                                  }
+                              }
+                          }, this),
+                          onfailure: BX.delegate(function (result) {
+                              // console.log(result);
+                              fNotification('Ошибка');
+                          }, this)
+                      }
+                    );
+                } else //Обновление заказа
+                {
+                    //Получаем данные из формы
+                    let prepared = BX.ajax.prepareForm(form),
+                      i;
+                    for (i in prepared.data) {
+                        if (prepared.data.hasOwnProperty(i) && i == '') {
+                            delete prepared.data[i];
+                        }
+                    }
+
+                    //Подготовка данных для отправки
+                    let data = {
+                        order: prepared.data,
+                        sessid: BX.bitrix_sessid(),
+                        via_ajax: 'Y',
+                        SITE_ID: arBasketResult["siteID"],
+                        signedParamsString: arBasketResult["signedParamsString"]
+                    };
+                    data[arBasketResult["ACTION_VARIABLE"]] = action;
+
+                    if (action === 'enterCoupon' || action === 'removeCoupon') {
+                        // data.coupon = actionData;
+                    }
+
+                    if (customData) {
+                        for (let key in customData) {
+                            data["order"][key] = customData[key];
+                        }
+                    }
+
+                    // console.log(data);
+
+                    BX.ajax({
+                        method: 'POST',
+                        dataType: 'json',
+                        url: arBasketResult["ajaxUrl"],
+                        data: data,
+                        onsuccess: BX.delegate(function (result) {
+                            // console.log(result);
+
+                            if (result.redirect && result.redirect.length) {
+                                document.location.href = result.redirect;
+                            } else if (!result['error']) {
+                                if (bOnlyPayment) { //Обновление только суммы для оплаты
+                                    //Обновление оплат
+                                    for (let itemPay of result['order']["PAY_SYSTEM"]) {
+                                        if (itemPay["CHECKED"] == "Y") {
+                                            document.querySelector('.js-payment-' + itemPay["ID"] + ' .js-sumOrder').innerHTML = result['order']["TOTAL"]["ORDER_TOTAL_PRICE_FORMATED"];
+                                        }
+                                    }
+                                } else //Обновление всех данных на странице
+                                {
+                                    //Обновление товаров
+                                    let productLi = form.querySelectorAll('.js-product');
+                                    productLi.forEach(product => {
+                                        product.querySelector('.input-number__input').value = result['order']['GRID']["ROWS"][product.dataset.id]["data"]['QUANTITY'] + product.querySelector('.input-number__input').dataset.prefix;
+                                        if (result['order']['GRID']["ROWS"][product.dataset.id]["data"]['QUANTITY'] == 1) {
+                                            product.querySelector('.input-number__button--minus').disabled = true;
+                                        } else {
+                                            product.querySelector('.input-number__button--minus').disabled = false;
+                                        }
+                                        if (result['order']['GRID']["ROWS"][product.dataset.id]["data"]['QUANTITY'] == arBasketResult["GRID"]["ROWS"][product.dataset.id]['data']["CATALOG_PARAMETERS"]['QUANTITY']) {
+                                            product.querySelector('.input-number__button--plus').disabled = true;
+                                        } else {
+                                            product.querySelector('.input-number__button--plus').disabled = false;
+                                        }
+                                        product.querySelector('.js-product-price').innerHTML = result['order']['GRID']["ROWS"][product.dataset.id]["data"]['PRICE_FORMATED'];
+                                        product.querySelector('.js-product-price-old').innerHTML = result['order']['GRID']["ROWS"][product.dataset.id]["data"]['BASE_PRICE_FORMATED'];
+                                        if (result['order']['GRID']["ROWS"][product.dataset.id]["data"]['PRICE'] >= result['order']['GRID']["ROWS"][product.dataset.id]["data"]['BASE_PRICE']) {
+                                            product.querySelector('.js-product-price-old').classList.add("hidden");
+                                        } else {
+                                            product.querySelector('.js-product-price-old').classList.remove("hidden");
+                                        }
+                                        product.querySelector('.js-product-price-sum').innerHTML = result['order']['GRID']["ROWS"][product.dataset.id]["data"]['SUM'];
+                                    });
+                                    document.getElementById('sumProducts').innerHTML = "<span>Итого: </span>" + result['order']['TOTAL']["ORDER_PRICE_FORMATED"];
+                                    arBasketResult["TOTAL"]["BASKET_POSITIONS"] = result['order']["TOTAL"]["BASKET_POSITIONS"];
+
+                                    //Обновление доставок
+                                    for (let key in result['order']["DELIVERY"]) {
+                                        if (result['order']["DELIVERY"][key]["CHECKED"] == "Y") {
+                                            if (result['order']["DELIVERY"][key]["ID"] == "2") {
+                                                form.querySelector('#delivery-map').classList.remove("hidden");
+                                                form.querySelector('#delivery-ADDRESS').classList.add("hidden");
+                                            } else {
+                                                form.querySelector('#delivery-map').classList.add("hidden");
+                                                form.querySelector('#delivery-ADDRESS').classList.remove("hidden");
+                                            }
+
+                                            if (result['order']["DELIVERY"][key]["ID"] == "2" || result['order']["DELIVERY"][key]["ID"] == "5") {
+                                                document.querySelector('.js-payment-2').classList.remove("hidden");
+                                            } else {
+                                                document.querySelector('.js-payment-2').classList.add("hidden");
+                                            }
+                                        }
+                                    }
+
+                                    //Обновление оплат
+                                    for (let itemPay of result['order']["PAY_SYSTEM"]) {
+                                        if (itemPay["CHECKED"] == "Y") {
+                                            document.querySelector('.js-payment-' + itemPay["ID"] + ' input').checked = true;
+                                            document.querySelector('.js-payment-' + itemPay["ID"] + ' .js-sumOrder').innerHTML = result['order']["TOTAL"]["ORDER_TOTAL_PRICE_FORMATED"];
+                                            document.querySelector('#sum').innerHTML = "<span>Итого (с доставкой): </span>" + result['order']["TOTAL"]["ORDER_TOTAL_PRICE_FORMATED"];
+
+                                            //Отображения описания
+                                            if (itemPay["DESCRIPTION"] != "") {
+                                                form.querySelector('#payment-description').classList.remove("hidden");
+                                                form.querySelector('#payment-description .text').innerHTML = itemPay["DESCRIPTION"];
+                                                if (itemPay["PSA_LOGOTIP_SRC"] != undefined) {
+                                                    form.querySelector('#payment-description .logo').innerHTML = '<img src="' + itemPay["PSA_LOGOTIP_SRC"] + '" alt="">';
+                                                } else {
+                                                    form.querySelector('#payment-description .logo').innerHTML = '';
+                                                }
+                                            } else {
+                                                form.querySelector('#payment-description').classList.add("hidden");
+                                                form.querySelector('#payment-description .text').innerHTML = '';
+                                                form.querySelector('#payment-description .logo').innerHTML = '';
+                                            }
+
+                                            //Отображение поля с реквизитами
+                                            if (itemPay["ID"] == "12") {
+                                                form.querySelector('#requisites').classList.remove("hidden");
+                                            } else {
+                                                form.querySelector('#requisites').classList.add("hidden");
+                                            }
+                                        } else {
+                                            let dataPay = {};
+                                            dataPay["PAY_SYSTEM_ID"] = itemPay["ID"];
+                                            ajax('refreshOrderAjax', dataPay, true);
+                                        }
+                                    }
+                                }
+                            } else {
+                                fNotification('Ошибка');
+                            }
+                        }, this),
+                        onfailure: BX.delegate(function () {
+                            fNotification('Ошибка');
+                        }, this)
+                    });
+                }
+            }
+        }
+
+        ajax('refreshOrderAjax');
+    });
+})(window);
+
+
+
+/* End */
+;; /* /local/templates/main/components/bitrix/sale.order.ajax/basket.2/script.js?168512140518260*/

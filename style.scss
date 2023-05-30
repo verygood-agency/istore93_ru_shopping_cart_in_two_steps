@@ -1,0 +1,16 @@
+.related-products {
+  &__title {
+    margin-bottom: 32px;
+  }
+}
+
+.transition-button {
+  padding: 64px 0 32px;
+}
+
+.cart-btn-submit {
+  max-width: max-content;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
